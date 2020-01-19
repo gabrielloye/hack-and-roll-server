@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 import re
 from sumy.nlp.stemmers import Stemmer
@@ -37,8 +37,8 @@ OTHER_HEADER = "<div id='other' class='header'>Other Clauses</div>"
 
 nlp = spacy.load("en_core_web_sm")
 
-VERBS = ["collection", "notify", "consent", "inform", "withdraw", "provide", "remain", "agree", "object", "obtain"]
-KEYWORDS = ["third party", "face recognition", "personal data", "personal privacy", "contractual obligations"]
+VERBS = ["responsible", "collect", "protect", "control", "sell", "access", "share", "disclosure", "collection", "notify", "consent", "inform", "withdraw", "provide", "remain", "agree", "object", "obtain"]
+KEYWORDS = ["third- party", "third party", "face recognition", "personal data", "personal privacy", "contractual obligations"]
 
 def prepare_for_regex(input_str, delimiter="."):
     cleanr = re.compile('<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});')
@@ -62,10 +62,13 @@ CORS(app)
 @app.route('/', methods=["GET","POST"])
 def main():
     if request.method == "POST":
-        link = request.json['link']
-        r = requests.get(link)
-        html_soup = BeautifulSoup(r.text, "html.parser")
-        text = html_soup.text
+        if 'link' in request.json:
+            link = request.json['link']
+            r = requests.get(link)
+            html_soup = BeautifulSoup(r.text, "html.parser")
+            text = html_soup.text
+        elif 'text' in request.json:
+            text = request.json['text']
     else:
         if 'text' in request.args:
             text = request.args['text']
@@ -76,6 +79,9 @@ def main():
             text = html_soup.text
         else:
             return "Please provide text"
+    return process_data(text)
+
+def process_data(text):
     text_data = unidecode.unidecode(text)
     clean_list, pure_list = prepare_for_regex(text_data)
 
@@ -109,20 +115,21 @@ def main():
             for token in sent:
                 if sentence and token.text.strip() not in string.punctuation:
                     sentence += " "
-                if token.pos_ == "VERB":
-                    if token.text.lower() in VERBS:
-                        sentence += '''<mark class="entity" style="background: #ffffb3; padding: 0.2em 0.2em; line-height: 1; border-radius: 0.35em; box-decoration-break: clone; -webkit-box-decoration-break: clone">{}</mark>'''.format(token.text)
-                        entities.append(token.text)
-                    else:
-                        sentence += token.text
+                if token.text.lower() in VERBS:
+                    sentence += '''<mark class="entity" style="background: #ffffb3; padding: 0.2em 0.2em; line-height: 1; border-radius: 0.35em; box-decoration-break: clone; -webkit-box-decoration-break: clone">{}</mark>'''.format(token.text)
+                    entities.append(token.text)
                 else:
                     sentence += token.text
             sentence = sentence[:-1] + ". "
             for ent in sent.ents:
-                if ent.text not in entities and ent.label_ == "ORG":
+                if ent.text == "IP":
+                    continue
+                if ent.text not in entities and ent.label_ == "ORG" or ent.text.lower()=="stripe":
                     sentence = sentence.replace(ent.text, '''<mark class="entity" style="background: #ccffcc; padding: 0.2em 0.2em; line-height: 1; border-radius: 0.35em; box-decoration-break: clone; -webkit-box-decoration-break: clone">{}</mark> '''.format(ent.text))
                     entities.append(ent.text)
             for term in KEYWORDS:
+                if term in entities:
+                    continue
                 case_insensitive = re.compile(re.escape(term), re.IGNORECASE)
                 sentence = case_insensitive.sub('''<mark class="entity" style="background: #b3d9ff; padding: 0.2em 0.2em;; line-height: 1; border-radius: 0.35em; box-decoration-break: clone; -webkit-box-decoration-break: clone">{}</mark>'''.format(term), sentence)
             sentences.append({
@@ -162,6 +169,15 @@ def get_readability(text_data):
         return 100-response['FLESCH_KINCAID'], response['COMPLEXWORDS']/response['WORDS']
     except:
         return 0, 0
+
+@app.route('/text')
+def text_box():
+    return render_template('index.html')
+
+@app.route('/submit_data')
+def submit_data():
+    text = request.args.get('value')
+    return process_data(text)
 
 if __name__ == '__main__':
   app.run(host="0.0.0.0", port=80)
